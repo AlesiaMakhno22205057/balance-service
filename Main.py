@@ -5,19 +5,33 @@ from service import balances, transactions, reservations
 from datetime import datetime
 from fastapi import Query
 import logging
+from models_db import User, Balance
+from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session
+
 
 
 logging.basicConfig(
     filename="balance_service.log",
     level=logging.INFO,          
     format="%(asctime)s - %(levelname)s - %(message)s"
+    
 )
+
+# Dependency
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
 
 
 app = FastAPI(title="User Balance Service", version="1.0")
 
 
-@app.post("/deposit", response_model=DepositResponse)
+"""@app.post("/deposit", response_model=DepositResponse)
 def deposit_endpoint(request: DepositRequest):
     """
     Deposit money to a user's account.
@@ -35,7 +49,7 @@ def deposit_endpoint(request: DepositRequest):
         user_id=request.user_id,
         new_balance=new_balance,
         message="Deposit successful"
-    )
+    )"""
 
 
 @app.get("/balance/{user_id}", response_model=BalanceResponse)
@@ -79,21 +93,15 @@ def deposit_endpoint(request: DepositRequest, db: Session = Depends(get_db)):
     """
     Deposit money to a user's account.
     """
-    # Start transaction
     with db.begin():
-        # Find user balance
         balance = db.query(Balance).filter(Balance.user_id == request.user_id).first()
         if not balance:
-            # Check if user exists
             user = db.query(User).filter(User.id == request.user_id).first()
             if not user:
                 raise HTTPException(status_code=404, detail="User not found")
-            # Create new balance record
             balance = Balance(user_id=request.user_id, amount=0.0)
             db.add(balance)
-            db.flush()  # чтобы id был доступен
-
-        # Update balance
+            db.flush() 
         balance.amount += request.amount
         db.commit()
 
@@ -104,7 +112,7 @@ def deposit_endpoint(request: DepositRequest, db: Session = Depends(get_db)):
         )
 
 
-@app.get("/transactions/{user_id}")
+"""@app.get("/transactions/{user_id}")
 def transactions_endpoint(
     user_id: int,
     skip: int = Query(0, ge=0),
@@ -122,4 +130,22 @@ def transactions_endpoint(
 
     paginated = user_transactions[skip : skip + limit]
 
-    return {"user_id": user_id, "transactions": paginated}
+    return {"user_id": user_id, "transactions": paginated}"""
+
+
+@app.get("/balance/{user_id}", response_model=BalanceResponse)
+def balance_endpoint(user_id: int, db: Session = Depends(get_db)):
+    """
+    Get current balance for a user from the database.
+    """
+    try:
+        with db.begin():  # транзакция "на чтение"
+            balance = db.query(Balance).filter(Balance.user_id == user_id).first()
+            if not balance:
+                raise HTTPException(status_code=404, detail="User balance not found")
+
+        return BalanceResponse(user_id=user_id, balance=balance.amount)
+
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error fetching balance: {e}")
