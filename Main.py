@@ -62,7 +62,7 @@ def balance_endpoint(user_id: int):
     return BalanceResponse(user_id=user_id, balance=balance)
 
 
-@app.post("/reserve", response_model=Reservation)
+"""@app.post("/reserve", response_model=Reservation)
 def reserve_endpoint(request: ReserveRequest):
     """
     Money reservation for the transaction.
@@ -85,7 +85,51 @@ def reserve_endpoint(request: ReserveRequest):
     )
     reservations[(request.user_id, request.order_id)] = reservation
     logging.info(f"Reservation successful: User {request.user_id}, Order {request.order_id}, Amount {request.amount}")
-    return {"message": "Reservation successful", "reservation": reservation}
+    return {"message": "Reservation successful", "reservation": reservation}"""
+
+@app.post("/reserve")
+def reserve_endpoint(request: ReserveRequest, db: Session = Depends(get_db)):
+    """
+    Reserve money for an order (stored in DB).
+    """
+    try:
+        with db.begin():  
+            user = db.query(User).filter(User.id == request.user_id).first()
+            if not user:
+                raise HTTPException(status_code=404, detail="User not found")
+
+            balance = db.query(Balance).filter(Balance.user_id == request.user_id).first()
+            if not balance or balance.amount < request.amount:
+                raise HTTPException(status_code=400, detail="Insufficient balance")
+
+            new_balance = balance.amount - request.amount
+            if new_balance < 0:
+                raise HTTPException(status_code=400, detail="Balance cannot be negative")
+
+            balance.amount = new_balance
+
+            reservation = Reservation(
+                user_id=request.user_id,
+                service_id=request.service_id,
+                order_id=request.order_id,
+                amount=request.amount,
+                status="reserved"
+            )
+            db.add(reservation)
+
+            logging.info(f"Reservation successful: user={request.user_id}, order={request.order_id}, amount={request.amount}")
+
+        db.commit()
+        return {"message": "Reservation successful", "reservation_id": reservation.id}
+
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as e:
+        db.rollback()
+        logging.error(f"Reservation failed for user={request.user_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Reservation failed: {e}")
+
 
 
 @app.post("/deposit", response_model=DepositResponse)
