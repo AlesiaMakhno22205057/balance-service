@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Budget Planner</title>
+
+    <!-- Font Awesome -->
+    <link
+        rel="stylesheet"
+        href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css"
+    />
+
+    <style>
+        * { box-sizing: border-box; }
+
+        body {
+            margin: 0;
+            font-family: Arial, sans-serif;
+            background-color: #f2f2f2;
+        }
+
+        /* ===== SIDEBAR ===== */
+        .sidebar {
+            position: fixed;
+            left: 0;
+            top: 0;
+            width: 220px;
+            height: 100vh;
+            background-color: #2c3e50;
+            padding: 20px;
+            color: white;
+        }
+
+        .sidebar h2 {
+            text-align: center;
+            margin-bottom: 25px;
+        }
+
+        .sidebar a {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background-color: #3498db;
+            color: white;
+            padding: 10px;
+            margin-bottom: 10px;
+            border-radius: 6px;
+            text-decoration: none;
+            font-weight: 500;
+        }
+
+        .sidebar a:hover {
+            background-color: #2980b9;
+        }
+
+        .sidebar i {
+            width: 18px;
+            text-align: center;
+        }
+
+        /* ===== CONTENT ===== */
+        .content {
+            margin-left: 220px;
+            padding: 30px 40px;
+        }
+
+        h1 {
+            margin-top: 0;
+        }
+
+        /* ===== CARDS ===== */
+        .card {
+            background-color: white;
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.08);
+            margin-bottom: 25px;
+            max-width: 900px;
+        }
+
+        label {
+            font-weight: 600;
+            display: block;
+            margin-top: 10px;
+        }
+
+        input, select {
+            width: 100%;
+            padding: 8px;
+            margin-top: 6px;
+        }
+
+        button {
+            margin-top: 12px;
+            background-color: #2e5bff;
+            color: white;
+            border: none;
+            padding: 8px 14px;
+            border-radius: 6px;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        button:hover {
+            background-color: #2047cc;
+        }
+
+        .btn-delete {
+            background-color: #e74c3c;
+        }
+
+        .btn-delete:hover {
+            background-color: #c0392b;
+        }
+
+        /* ===== BUDGET PROGRESS ===== */
+        .budget-item {
+            margin-bottom: 22px;
+        }
+
+        .budget-header {
+            display: flex;
+            justify-content: space-between;
+            font-weight: bold;
+            margin-bottom: 6px;
+        }
+
+        .progress-bar {
+            background-color: #eee;
+            border-radius: 10px;
+            height: 14px;
+            overflow: hidden;
+        }
+
+        .progress-fill {
+            height: 100%;
+            border-radius: 10px;
+        }
+
+        .progress-fill.ok {
+            background-color: #2ecc71;
+        }
+
+        .progress-fill.warning {
+            background-color: #f1c40f;
+        }
+
+        .progress-fill.danger {
+            background-color: #e74c3c;
+        }
+
+        .budget-footer {
+            display: flex;
+            justify-content: space-between;
+            font-size: 12px;
+            margin-top: 5px;
+        }
+
+        .over {
+            color: #e74c3c;
+            font-weight: bold;
+        }
+    </style>
+</head>
+
+<body>
+
+<!-- ===== SIDEBAR ===== -->
+<div class="sidebar">
+    <h2>Menu</h2>
+    <a href="/home"><i class="fa-solid fa-house"></i> Home</a>
+    <a href="/transactions"><i class="fa-solid fa-receipt"></i> Transactions</a>
+    <a href="/budget"><i class="fa-solid fa-chart-pie"></i> Budget</a>
+    <a href="/logout"><i class="fa-solid fa-right-from-bracket"></i> Logout</a>
+</div>
+
+<!-- ===== CONTENT ===== -->
+<div class="content">
+
+    <h1><i class="fa-solid fa-chart-pie"></i> Budget Planner</h1>
+
+    <!-- ADD / UPDATE BUDGET -->
+    <div class="card">
+        <h2><i class="fa-solid fa-pen-to-square"></i> Set Monthly Budget</h2>
+
+        <form method="post" action="/budget">
+            <label>Category</label>
+            <select name="category" required>
+                <option value="">Select category</option>
+                {% for cat in categories %}
+                    <option value="{{ cat }}">{{ cat }}</option>
+                {% endfor %}
+            </select>
+
+            <label>Amount ($)</label>
+            <input type="number" name="amount" step="0.01" required>
+
+            <button type="submit">
+                <i class="fa-solid fa-floppy-disk"></i> Save Budget
+            </button>
+        </form>
+    </div>
+
+    <!-- BUDGET PROGRESS -->
+    <div class="card">
+        <h2><i class="fa-solid fa-chart-line"></i> Budget Progress</h2>
+
+        {% if budget_data %}
+            {% for b in budget_data %}
+            <div class="budget-item">
+
+                <div class="budget-header">
+                    <span>{{ b.category }}</span>
+                    <span>${{ b.spent }} / ${{ b.budget }}</span>
+                </div>
+
+                <div class="progress-bar">
+                    <div class="progress-fill {{ b.status }}"
+                         style="width: {{ b.percent if b.percent <= 100 else 100 }}%;">
+                    </div>
+                </div>
+
+                <div class="budget-footer">
+                    <span>{{ b.percent }}%</span>
+                    {% if b.status == "danger" %}
+                        <span class="over">
+                            <i class="fa-solid fa-triangle-exclamation"></i> Over budget
+                        </span>
+                    {% endif %}
+                </div>
+
+                <form method="post" action="/budget/delete">
+                    <input type="hidden" name="budget_id" value="{{ b.id }}">
+                    <button type="submit" class="btn-delete">
+                        <i class="fa-solid fa-trash"></i> Delete
+                    </button>
+                </form>
+
+                <hr>
+            </div>
+            {% endfor %}
+        {% else %}
+            <p style="text-align:center;">No budgets set yet.</p>
+        {% endif %}
+    </div>
+
+</div>
+
+</body>
+</html>

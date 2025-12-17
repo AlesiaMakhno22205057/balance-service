@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>User Dashboard</title>
+
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2"></script>
+
+    <!-- Font Awesome -->
+    <link rel="stylesheet"
+          href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css"/>
+
+    <style>
+        * { box-sizing: border-box; }
+
+        body {
+            margin: 0;
+            font-family: Arial, sans-serif;
+            background-color: #f2f2f2;
+        }
+
+        /* ===== SIDEBAR ===== */
+        .sidebar {
+            position: fixed;
+            width: 220px;
+            height: 100vh;
+            background: #2c3e50;
+            padding: 20px;
+            color: white;
+        }
+
+        .sidebar h2 {
+            text-align: center;
+            margin-bottom: 25px;
+        }
+
+        .sidebar a {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: #3498db;
+            color: white;
+            padding: 10px;
+            margin-bottom: 10px;
+            border-radius: 6px;
+            text-decoration: none;
+        }
+
+        .sidebar a:hover {
+            background: #2980b9;
+        }
+
+        /* ===== CONTENT ===== */
+        .content {
+            margin-left: 220px;
+            padding: 30px 40px;
+        }
+
+        /* ===== DASHBOARD ===== */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 20px;
+            margin: 25px 0;
+        }
+
+        .stat-card {
+            background: white;
+            padding: 18px;
+            border-radius: 14px;
+            box-shadow: 0 6px 14px rgba(0,0,0,0.08);
+        }
+
+        .stat-label {
+            font-size: 13px;
+            color: #777;
+        }
+
+        .stat-value {
+            font-size: 24px;
+            font-weight: 700;
+            margin-top: 6px;
+        }
+
+        .balance { border-left: 6px solid #2e5bff; }
+        .income  { border-left: 6px solid #2ecc71; }
+        .expense { border-left: 6px solid #e74c3c; }
+        .net     { border-left: 6px solid #9b59b6; }
+
+        /* ===== CARD ===== */
+        .card {
+            background: white;
+            padding: 22px;
+            border-radius: 14px;
+            box-shadow: 0 6px 14px rgba(0,0,0,0.08);
+            margin-bottom: 35px;
+            max-width: 900px;
+        }
+
+        label {
+            font-weight: 600;
+            display: block;
+            margin-top: 12px;
+        }
+
+        input, select {
+            width: 100%;
+            padding: 9px;
+            margin-top: 6px;
+        }
+
+        button {
+            margin-top: 16px;
+            background: #2e5bff;
+            color: white;
+            border: none;
+            padding: 10px 18px;
+            border-radius: 6px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        button:hover {
+            background: #2047cc;
+        }
+
+        /* ===== CHARTS ===== */
+        .charts-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 20px;
+            max-width: 1100px;
+            margin: auto;
+        }
+
+        .chart-card {
+            background: white;
+            padding: 15px;
+            border-radius: 14px;
+            box-shadow: 0 6px 14px rgba(0,0,0,0.08);
+            height: 320px;
+        }
+
+        .chart-card.full {
+            grid-column: span 2;
+            height: 300px;
+        }
+
+        .chart-wrapper {
+            height: calc(100% - 30px);
+        }
+
+        @media (max-width: 900px) {
+            .stats-grid { grid-template-columns: repeat(2, 1fr); }
+            .charts-grid { grid-template-columns: 1fr; }
+            .chart-card.full { grid-column: span 1; }
+        }
+    </style>
+</head>
+
+<body>
+
+<!-- SIDEBAR -->
+<div class="sidebar">
+    <h2>Menu</h2>
+    <a href="/home"><i class="fa-solid fa-house"></i> Home</a>
+    <a href="/transactions"><i class="fa-solid fa-receipt"></i> Transactions</a>
+    <a href="/budget"><i class="fa-solid fa-chart-pie"></i> Budget</a>
+    <a href="/logout"><i class="fa-solid fa-right-from-bracket"></i> Logout</a>
+</div>
+
+<div class="content">
+
+    <h1>Welcome, {{ username }}!</h1>
+    <p>Overview of your financial activity</p>
+
+    <!-- DASHBOARD CARDS -->
+    <div class="stats-grid">
+        <div class="stat-card balance">
+            <div class="stat-label">Current Balance</div>
+            <div class="stat-value">${{ balance }}</div>
+        </div>
+
+        <div class="stat-card income">
+            <div class="stat-label">Monthly Income</div>
+            <div class="stat-value" id="monthlyIncome">$0</div>
+        </div>
+
+        <div class="stat-card expense">
+            <div class="stat-label">Monthly Expense</div>
+            <div class="stat-value" id="monthlyExpense">$0</div>
+        </div>
+
+        <div class="stat-card net">
+            <div class="stat-label">Net Change</div>
+            <div class="stat-value" id="netChange">$0</div>
+        </div>
+    </div>
+
+    <!-- ✅ ADD TRANSACTION (YOUR CODE, KEPT) -->
+    <div class="card">
+        <h2><i class="fa-solid fa-money-bill-wave"></i> Add Transaction</h2>
+
+        <form method="post" action="/transaction">
+            <label>Amount</label>
+            <input type="number" step="0.01" name="amount" required>
+
+            <label>Type</label>
+            <select name="type" id="type" required onchange="updateSubcategories()">
+                <option value="" disabled selected>Select Type</option>
+                <option>Income</option>
+                <option>Expense</option>
+                <option>Loan Given</option>
+                <option>Loan Received</option>
+            </select>
+
+            <label>Subcategory</label>
+            <select name="subcategory" id="subcategory" required>
+                <option value="">Select Subcategory</option>
+            </select>
+
+            <button type="submit">
+                <i class="fa-solid fa-plus"></i> Add Transaction
+            </button>
+        </form>
+    </div>
+
+    <!-- CHARTS -->
+    <div class="charts-grid">
+        <div class="chart-card">
+            <div class="chart-wrapper">
+                <canvas id="barChart"></canvas>
+            </div>
+        </div>
+
+        <div class="chart-card">
+            <div class="chart-wrapper">
+                <canvas id="pieChart"></canvas>
+            </div>
+        </div>
+
+        <div class="chart-card full">
+            <div class="chart-wrapper">
+                <canvas id="lineChart"></canvas>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<script>
+const subcategoryData = {
+    Income: ["Salary","Freelance","Gift","Bonus","Other"],
+    Expense: ["Food","Rent","Shopping","Transportation","Utilities","Healthcare","Entertainment","Other"],
+    "Loan Given": ["Friend","Family","Business","Other"],
+    "Loan Received": ["Friend","Family","Bank","Other"]
+};
+
+function updateSubcategories() {
+    const type = document.getElementById("type").value;
+    const sub = document.getElementById("subcategory");
+    sub.innerHTML = '<option value="">Select Subcategory</option>';
+    (subcategoryData[type] || []).forEach(s => {
+        sub.innerHTML += `<option>${s}</option>`;
+    });
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+
+    const incomeExpenseData = {{ income_expense_by_month | tojson }};
+    const subcategoryTotals = {{ subcategory_totals | tojson }};
+    const balanceOverTime = {{ balance_over_time | tojson }};
+
+    let income = 0, expense = 0;
+    Object.values(incomeExpenseData).forEach(v => {
+        income += v.Income || 0;
+        expense += v.Expense || 0;
+    });
+
+    document.getElementById("monthlyIncome").textContent = `$${income.toFixed(2)}`;
+    document.getElementById("monthlyExpense").textContent = `$${expense.toFixed(2)}`;
+    document.getElementById("netChange").textContent = `$${(income - expense).toFixed(2)}`;
+
+    new Chart(barChart, {
+        type: "bar",
+        data: {
+            labels: Object.keys(incomeExpenseData),
+            datasets: [
+                { label: "Income", data: Object.values(incomeExpenseData).map(v => v.Income || 0), backgroundColor: "#2ecc71" },
+                { label: "Expense", data: Object.values(incomeExpenseData).map(v => v.Expense || 0), backgroundColor: "#e74c3c" }
+            ]
+        },
+        options: { responsive: true, maintainAspectRatio: false }
+    });
+
+    new Chart(pieChart, {
+    type: "pie",
+    data: {
+        labels: Object.keys(subcategoryTotals),
+        datasets: [{
+            data: Object.values(subcategoryTotals),
+            backgroundColor: ["#3498db","#f39c12","#9b59b6","#1abc9c"]
+        }]
+    },
+    plugins: [ChartDataLabels],
+    options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+            legend: {
+                position: "right"
+            },
+            datalabels: {
+                color: "#fff",
+                font: {
+                    weight: "bold",
+                    size: 12
+                },
+                formatter: (value, ctx) => {
+                    const data = ctx.chart.data.datasets[0].data;
+                    const total = data.reduce((a, b) => a + b, 0);
+                    const percentage = ((value / total) * 100).toFixed(1);
+                    return percentage + "%";
+                }
+            }
+        }
+    }
+});
+
+    new Chart(lineChart, {
+        type: "line",
+        data: {
+            labels: balanceOverTime.map(d => d.date),
+            datasets: [{
+                label: "Balance",
+                data: balanceOverTime.map(d => d.balance),
+                borderColor: "#2980b9",
+                fill: true
+            }]
+        },
+        options: { responsive: true, maintainAspectRatio: false }
+    });
+});
+</script>
+
+</body>
+</html>

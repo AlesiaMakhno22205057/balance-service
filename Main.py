@@ -1,23 +1,44 @@
-from fastapi import FastAPI, HTTPException
-from models import TransactionResponse, DepositRequest, DepositResponse, BalanceResponse, ReserveRequest, Reservation, Transaction
-from service import deposit, get_balance, reserve_funds, recognize_transaction
-from service import balances, transactions, reservations
-from datetime import datetime
-from fastapi import Query
-import logging
-from models_db import User, Balance
+from fastapi import FastAPI, Request, Form, Depends, HTTPException, Query
+from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.templating import Jinja2Templates
+from fastapi.staticfiles import StaticFiles
+from starlette.middleware.sessions import SessionMiddleware
+from starlette.status import HTTP_302_FOUND
+
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 
+from datetime import datetime
+from typing import Optional
+from collections import defaultdict
+import logging
 
+from database import SessionLocal
+from models_db import User, Balance, Transaction as DBTransaction, Budget
+from categories import CATEGORIES
 
+# =====================================================
+# LOGGING
+# =====================================================
 logging.basicConfig(
     filename="balance_service.log",
-    level=logging.INFO,          
-    format="%(asctime)s - %(levelname)s - %(message)s"
-    
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
 )
 
-# Dependency
+# =====================================================
+# APP SETUP
+# =====================================================
+app = FastAPI(title="User Balance Service", version="1.0")
+
+app.add_middleware(SessionMiddleware, secret_key="supersecretkey")
+
+templates = Jinja2Templates(directory="templates")
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
+# =====================================================
+# DB DEPENDENCY
+# =====================================================
 def get_db():
     db = SessionLocal()
     try:
@@ -25,170 +46,309 @@ def get_db():
     finally:
         db.close()
 
+# =====================================================
+# AUTH
+# =====================================================
+@app.get("/", response_class=HTMLResponse)
+def landing_page(request: Request):
+    return templates.TemplateResponse("auth.html", {"request": request})
 
 
-app = FastAPI(title="User Balance Service", version="1.0")
+@app.get("/login", response_class=HTMLResponse)
+def login_form(request: Request):
+    return templates.TemplateResponse("login.html", {"request": request})
 
 
-"""@app.post("/deposit", response_model=DepositResponse)
-def deposit_endpoint(request: DepositRequest):
-    """
-
-    """
-    if request.user_id not in balances:
-        logging.error(f"Deposit failed: User {request.user_id} not found")
-        raise HTTPException(status_code=404, detail="User not found") 
-           
-    new_balance = deposit(request.user_id, request.amount)
-
-    logging.info(f"Deposit successful: User {request.user_id}, Amount {request.amount}, New Balance {new_balance}")
-
-    return DepositResponse(
-        user_id=request.user_id,
-        new_balance=new_balance,
-        message="Deposit successful"
-    )"""
-
-
-@app.get("/balance/{user_id}", response_model=BalanceResponse)
-def balance_endpoint(user_id: int):
-    """
-    Get current balance for a user.
-    Returns 0.0 if the user does not exist.
-    """
-    balance = get_balance(user_id)
-    return BalanceResponse(user_id=user_id, balance=balance)
-
-
-"""@app.post("/reserve", response_model=Reservation)
-def reserve_endpoint(request: ReserveRequest):
-    """
-    """
-    if request.user_id not in balances:
-        logging.error(f"Reservation failed: User {request.user_id} not found")
-        raise HTTPException(status_code=404, detail="User not found")
-
-    if balances[request.user_id] < request.amount:
-        logging.warning(f"Reservation failed: Insufficient balance for user {request.user_id}")
-        raise HTTPException(status_code=400, detail="Insufficient balance")
-
-    balances[request.user_id] -= request.amount
-    reservation = Reservation(
-        user_id=request.user_id,
-        service_id=request.service_id,
-        order_id=request.order_id,
-        amount=request.amount,
-        status="reserved"
-    )
-    reservations[(request.user_id, request.order_id)] = reservation
-    logging.info(f"Reservation successful: User {request.user_id}, Order {request.order_id}, Amount {request.amount}")
-    return {"message": "Reservation successful", "reservation": reservation}"""
-
-@app.post("/reserve")
-def reserve_endpoint(request: ReserveRequest, db: Session = Depends(get_db)):
-    """
-    Reserve money for an order (stored in DB).
-    """
-    try:
-        with db.begin():  
-            user = db.query(User).filter(User.id == request.user_id).first()
-            if not user:
-                raise HTTPException(status_code=404, detail="User not found")
-
-            balance = db.query(Balance).filter(Balance.user_id == request.user_id).first()
-            if not balance or balance.amount < request.amount:
-                raise HTTPException(status_code=400, detail="Insufficient balance")
-
-            new_balance = balance.amount - request.amount
-            if new_balance < 0:
-                raise HTTPException(status_code=400, detail="Balance cannot be negative")
-
-            balance.amount = new_balance
-
-            reservation = Reservation(
-                user_id=request.user_id,
-                service_id=request.service_id,
-                order_id=request.order_id,
-                amount=request.amount,
-                status="reserved"
-            )
-            db.add(reservation)
-
-            logging.info(f"Reservation successful: user={request.user_id}, order={request.order_id}, amount={request.amount}")
-
-        db.commit()
-        return {"message": "Reservation successful", "reservation_id": reservation.id}
-
-    except HTTPException:
-        db.rollback()
-        raise
-    except Exception as e:
-        db.rollback()
-        logging.error(f"Reservation failed for user={request.user_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Reservation failed: {e}")
-
-
-
-@app.post("/deposit", response_model=DepositResponse)
-def deposit_endpoint(request: DepositRequest, db: Session = Depends(get_db)):
-    """
-    Deposit money to a user's account.
-    """
-    with db.begin():
-        balance = db.query(Balance).filter(Balance.user_id == request.user_id).first()
-        if not balance:
-            user = db.query(User).filter(User.id == request.user_id).first()
-            if not user:
-                raise HTTPException(status_code=404, detail="User not found")
-            balance = Balance(user_id=request.user_id, amount=0.0)
-            db.add(balance)
-            db.flush() 
-        balance.amount += request.amount
-        db.commit()
-
-        return DepositResponse(
-            user_id=request.user_id,
-            new_balance=balance.amount,
-            message="Deposit successful"
+@app.post("/login")
+def login(
+    request: Request,
+    username: str = Form(...),
+    password: str = Form(...),
+    db: Session = Depends(get_db),
+):
+    user = db.query(User).filter(User.username == username).first()
+    if not user or user.password != password:
+        return templates.TemplateResponse(
+            "login.html",
+            {"request": request, "error": "Invalid username or password"},
         )
 
+    request.session["user_id"] = user.id
+    request.session["username"] = user.username
+    return RedirectResponse("/home", status_code=HTTP_302_FOUND)
 
-"""@app.get("/transactions/{user_id}")
-def transactions_endpoint(
-    user_id: int,
-    skip: int = Query(0, ge=0),
-    limit: int = Query(10, ge=1, le=100),
-    sort_by: str = Query("timestamp"),
-    order: str = Query("desc")
+
+@app.get("/logout")
+def logout(request: Request):
+    request.session.clear()
+    return RedirectResponse("/", status_code=HTTP_302_FOUND)
+
+
+@app.get("/register", response_class=HTMLResponse)
+def register_form(request: Request):
+    return templates.TemplateResponse("register.html", {"request": request})
+
+
+@app.post("/register")
+def register(
+    request: Request,
+    username: str = Form(...),
+    password: str = Form(...),
+    initial_balance: float = Form(...),
+    db: Session = Depends(get_db),
 ):
-    user_transactions = [t for t in transactions if t.user_id == user_id]
+    if db.query(User).filter(User.username == username).first():
+        return templates.TemplateResponse(
+            "register.html",
+            {"request": request, "error": "Username already exists"},
+        )
 
-    reverse = True if order == "desc" else False
-    if sort_by == "timestamp":
-        user_transactions.sort(key=lambda t: t.timestamp, reverse=reverse)
-    elif sort_by == "amount":
-        user_transactions.sort(key=lambda t: t.amount, reverse=reverse)
+    user = User(username=username, password=password)
+    db.add(user)
+    db.flush()
 
-    paginated = user_transactions[skip : skip + limit]
+    db.add(Balance(user_id=user.id, amount=initial_balance))
+    db.commit()
 
-    return {"user_id": user_id, "transactions": paginated}"""
+    return RedirectResponse("/", status_code=HTTP_302_FOUND)
+
+# =====================================================
+# HOME (FIXED BALANCE OVER TIME)
+# =====================================================
+@app.get("/home", response_class=HTMLResponse)
+def home(
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    user_id = request.session.get("user_id")
+    username = request.session.get("username")
+
+    if not user_id:
+        return RedirectResponse("/", status_code=HTTP_302_FOUND)
+
+    balance_row = db.query(Balance).filter_by(user_id=user_id).first()
+    current_balance = balance_row.amount if balance_row else 0
+
+    transactions = (
+        db.query(DBTransaction)
+        .filter(DBTransaction.user_id == user_id)
+        .order_by(DBTransaction.timestamp.asc())
+        .all()
+    )
+
+    # ------------------------------
+    # 📊 CHART DATA
+    # ------------------------------
+    income_expense_by_month = defaultdict(lambda: {"Income": 0, "Expense": 0})
+    subcategory_totals = defaultdict(float)
+    balance_over_time = []
+
+    running_balance = 0
+
+    for tx in transactions:
+        month = tx.timestamp.strftime("%Y-%m")
+
+        # Income vs Expense
+        if tx.type in ["Income", "Expense"]:
+            income_expense_by_month[month][tx.type] += tx.amount
+
+        # Expenses by category
+        if tx.type == "Expense":
+            subcategory_totals[tx.subcategory] += tx.amount
+
+        # Balance over time (PER TRANSACTION)
+        if tx.type in ["Income", "Loan Received"]:
+            running_balance += tx.amount
+        else:
+            running_balance -= tx.amount
+
+        balance_over_time.append({
+            "date": tx.timestamp.strftime("%Y-%m-%d %H:%M"),
+            "balance": running_balance,
+        })
+
+    return templates.TemplateResponse(
+        "home.html",
+        {
+            "request": request,
+            "username": username,
+            "balance": current_balance,
+            "income_expense_by_month": dict(income_expense_by_month),
+            "subcategory_totals": dict(subcategory_totals),
+            "balance_over_time": balance_over_time,
+        },
+    )
+
+# =====================================================
+# TRANSACTIONS
+# =====================================================
+@app.post("/transaction")
+def create_transaction(
+    request: Request,
+    amount: float = Form(...),
+    type: str = Form(...),
+    subcategory: str = Form(...),
+    db: Session = Depends(get_db),
+):
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return RedirectResponse("/", status_code=HTTP_302_FOUND)
+
+    balance = db.query(Balance).filter_by(user_id=user_id).first()
+    if not balance:
+        balance = Balance(user_id=user_id, amount=0)
+        db.add(balance)
+        db.flush()
+
+    if type in ["Income", "Loan Received"]:
+        balance.amount += amount
+    else:
+        balance.amount -= amount
+
+    db.add(
+        DBTransaction(
+            user_id=user_id,
+            amount=amount,
+            type=type,
+            subcategory=subcategory,
+            timestamp=datetime.utcnow(),
+            service_id=0,
+            order_id=0,
+        )
+    )
+
+    db.commit()
+    return RedirectResponse("/transactions", status_code=HTTP_302_FOUND)
 
 
-@app.get("/balance/{user_id}", response_model=BalanceResponse)
-def balance_endpoint(user_id: int, db: Session = Depends(get_db)):
-    """
-    Get current balance for a user from the database.
-    """
-    try:
-        with db.begin():  # транзакция "на чтение"
-            balance = db.query(Balance).filter(Balance.user_id == user_id).first()
-            if not balance:
-                raise HTTPException(status_code=404, detail="User balance not found")
+@app.get("/transactions", response_class=HTMLResponse)
+def transactions_page(
+    request: Request,
+    db: Session = Depends(get_db),
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    min_amount: Optional[float] = None,
+    max_amount: Optional[float] = None,
+    tx_type: Optional[str] = None,
+    category: Optional[str] = None,
+):
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return RedirectResponse("/", status_code=HTTP_302_FOUND)
 
-        return BalanceResponse(user_id=user_id, balance=balance.amount)
+    query = db.query(DBTransaction).filter(DBTransaction.user_id == user_id)
 
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=f"Error fetching balance: {e}")
+    if start_date:
+        query = query.filter(DBTransaction.timestamp >= datetime.fromisoformat(start_date))
+    if end_date:
+        query = query.filter(DBTransaction.timestamp <= datetime.fromisoformat(end_date))
+    if min_amount is not None:
+        query = query.filter(DBTransaction.amount >= min_amount)
+    if max_amount is not None:
+        query = query.filter(DBTransaction.amount <= max_amount)
+    if tx_type and tx_type != "All":
+        query = query.filter(DBTransaction.type == tx_type)
+    if category:
+        query = query.filter(DBTransaction.subcategory == category)
+
+    transactions = query.order_by(DBTransaction.timestamp.desc()).all()
+
+    return templates.TemplateResponse(
+        "transactions.html",
+        {
+            "request": request,
+            "transactions": transactions,
+            "categories": CATEGORIES,
+            "filters": {
+                "start_date": start_date,
+                "end_date": end_date,
+                "min_amount": min_amount,
+                "max_amount": max_amount,
+                "tx_type": tx_type or "All",
+                "category": category or "",
+            },
+        },
+    )
+
+# =====================================================
+# BUDGET
+# =====================================================
+@app.get("/budget", response_class=HTMLResponse)
+def budget_page(request: Request, db: Session = Depends(get_db)):
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return RedirectResponse("/", status_code=HTTP_302_FOUND)
+
+    budgets = db.query(Budget).filter(Budget.user_id == user_id).all()
+
+    expenses = (
+        db.query(DBTransaction.subcategory, func.sum(DBTransaction.amount))
+        .filter(DBTransaction.user_id == user_id, DBTransaction.type == "Expense")
+        .group_by(DBTransaction.subcategory)
+        .all()
+    )
+
+    expenses_dict = {c: float(a or 0) for c, a in expenses}
+
+    budget_data = []
+    for b in budgets:
+        spent = expenses_dict.get(b.category, 0)
+        percent = (spent / b.amount) * 100 if b.amount else 0
+        status = "ok" if percent < 80 else "warning" if percent <= 100 else "danger"
+
+        budget_data.append({
+            "id": b.id,
+            "category": b.category,
+            "budget": b.amount,
+            "spent": spent,
+            "percent": round(percent, 1),
+            "status": status,
+        })
+
+    return templates.TemplateResponse(
+        "budget.html",
+        {
+            "request": request,
+            "categories": CATEGORIES,
+            "budget_data": budget_data,
+        },
+    )
 
 
+@app.post("/budget")
+def add_budget(
+    request: Request,
+    category: str = Form(...),
+    amount: float = Form(...),
+    db: Session = Depends(get_db),
+):
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return RedirectResponse("/", status_code=HTTP_302_FOUND)
+
+    budget = db.query(Budget).filter_by(user_id=user_id, category=category).first()
+    if budget:
+        budget.amount = amount
+    else:
+        db.add(Budget(user_id=user_id, category=category, amount=amount))
+
+    db.commit()
+    return RedirectResponse("/budget", status_code=HTTP_302_FOUND)
+
+
+@app.post("/budget/delete")
+def delete_budget(
+    request: Request,
+    budget_id: int = Form(...),
+    db: Session = Depends(get_db),
+):
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return RedirectResponse("/", status_code=HTTP_302_FOUND)
+
+    budget = db.query(Budget).filter_by(id=budget_id, user_id=user_id).first()
+    if budget:
+        db.delete(budget)
+        db.commit()
+
+    return RedirectResponse("/budget", status_code=HTTP_302_FOUND)
